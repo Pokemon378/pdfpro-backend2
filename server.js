@@ -29,6 +29,9 @@ app.use(cors({
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
+// Serve static files from frontend
+app.use(express.static(path.join(__dirname, '../frontend')));
+
 // Request logging
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -115,25 +118,9 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Root endpoint
+// Root endpoint - Serve frontend
 app.get('/', (req, res) => {
-    res.json({
-        name: 'PDFPro API',
-        version: '2.0.0',
-        endpoints: [
-            '/api/health',
-            '/api/merge',
-            '/api/split',
-            '/api/compress',
-            '/api/rotate',
-            '/api/watermark',
-            '/api/pdf-to-image',
-            '/api/image-to-pdf',
-            '/api/delete-pages',
-            '/api/reorder-pages',
-            '/api/extract-text'
-        ]
-    });
+    res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
 // ============================================
