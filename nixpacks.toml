@@ -1,0 +1,14 @@
+# Railway Nixpacks Configuration for PDFPro Backend
+
+[phases.setup]
+nixPkgs = ["nodejs-18_x", "graphicsmagick", "ghostscript"]
+aptPackages = ["graphicsmagick", "ghostscript"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["echo 'No build step required'"]
+
+[start]
+cmd = "npm start"
