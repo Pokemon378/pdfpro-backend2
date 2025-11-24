@@ -1,89 +1,41 @@
 const { PDFDocument } = require('pdf-lib');
 const fs = require('fs').promises;
 const path = require('path');
-const sharp = require('sharp');
 
-/**
- * Convert images to PDF
- * @route POST /api/image-to-pdf
- * @param {Array} req.files - Image files to convert
- * @param {String} req.body.pageSize - Page size: 'A4', 'Letter', 'auto' (default 'auto')
- */
-exports.imageToPdf = async (req, res) => {
-    const uploadedFiles = [];
-
+exports.convert = async (req, res) => {
     try {
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ error: 'At least one image file is required' });
         }
 
-        uploadedFiles.push(...req.files.map(f => f.path));
-        const pageSize = req.body.pageSize || 'auto';
-
         // Create a new PDF document
         const pdfDoc = await PDFDocument.create();
 
-        // Process each image
+        // Add each image as a page
         for (const file of req.files) {
-            let imageBytes = await fs.readFile(file.path);
+            const imageBytes = await fs.readFile(file.path);
             let image;
 
-            // Embed image based on type
-            const ext = path.extname(file.originalname).toLowerCase();
-
-            if (ext === '.png') {
+            // Detect image type and embed
+            if (file.mimetype === 'image/png') {
                 image = await pdfDoc.embedPng(imageBytes);
-            } else if (['.jpg', '.jpeg'].includes(ext)) {
+            } else if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg') {
                 image = await pdfDoc.embedJpg(imageBytes);
             } else {
-                // Convert other formats to PNG using sharp
-                const pngBuffer = await sharp(imageBytes).png().toBuffer();
-                image = await pdfDoc.embedPng(pngBuffer);
+                await fs.unlink(file.path);
+                continue; // Skip unsupported formats
             }
 
-            // Determine page dimensions
-            let pageWidth, pageHeight;
-
-            if (pageSize === 'A4') {
-                pageWidth = 595.28;  // A4 width in points
-                pageHeight = 841.89; // A4 height in points
-            } else if (pageSize === 'Letter') {
-                pageWidth = 612;     // Letter width in points
-                pageHeight = 792;    // Letter height in points
-            } else {
-                // Auto: use image dimensions
-                pageWidth = image.width;
-                pageHeight = image.height;
-            }
-
-            // Add page with image
-            const page = pdfDoc.addPage([pageWidth, pageHeight]);
-
-            // Calculate scaling to fit image on page while maintaining aspect ratio
-            const imageAspectRatio = image.width / image.height;
-            const pageAspectRatio = pageWidth / pageHeight;
-
-            let drawWidth, drawHeight;
-            if (imageAspectRatio > pageAspectRatio) {
-                // Image is wider than page
-                drawWidth = pageWidth;
-                drawHeight = pageWidth / imageAspectRatio;
-            } else {
-                // Image is taller than page
-                drawHeight = pageHeight;
-                drawWidth = pageHeight * imageAspectRatio;
-            }
-
-            // Center image on page
-            const x = (pageWidth - drawWidth) / 2;
-            const y = (pageHeight - drawHeight) / 2;
-
+            const page = pdfDoc.addPage([image.width, image.height]);
             page.drawImage(image, {
-                x: x,
-                y: y,
-                width: drawWidth,
-                height: drawHeight
+                x: 0,
+                y: 0,
+                width: image.width,
+                height: image.height,
             });
+
+            // Clean up uploaded file
+            await fs.unlink(file.path);
         }
 
         // Save the PDF
@@ -91,31 +43,18 @@ exports.imageToPdf = async (req, res) => {
         const outputPath = path.join(__dirname, '..', 'uploads', `images-to-pdf-${Date.now()}.pdf`);
         await fs.writeFile(outputPath, pdfBytes);
 
-        // Clean up uploaded files
-        for (const filePath of uploadedFiles) {
-            await fs.unlink(filePath).catch(err => console.error('Cleanup error:', err));
-        }
-
-        // Send the PDF file
-        res.download(outputPath, 'images.pdf', async (err) => {
-            if (err) {
-                console.error('Download error:', err);
+        // Send the file
+        res.download(outputPath, 'converted.pdf', async (err) => {
+            if (err) console.error('Download error:', err);
+            try {
+                await fs.unlink(outputPath);
+            } catch (e) {
+                console.error('Cleanup error:', e);
             }
-            // Clean up output file
-            await fs.unlink(outputPath).catch(e => console.error('Output cleanup error:', e));
         });
 
     } catch (error) {
         console.error('Image to PDF error:', error);
-
-        // Clean up on error
-        for (const filePath of uploadedFiles) {
-            await fs.unlink(filePath).catch(() => { });
-        }
-
-        res.status(500).json({
-            error: 'Failed to convert images to PDF',
-            details: error.message
-        });
+        res.status(500).json({ error: 'Failed to convert images to PDF', details: error.message });
     }
 };

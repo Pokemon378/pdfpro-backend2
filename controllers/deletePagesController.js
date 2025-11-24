@@ -2,77 +2,50 @@ const { PDFDocument } = require('pdf-lib');
 const fs = require('fs').promises;
 const path = require('path');
 
-/**
- * Delete specific pages from PDF
- * @route POST /api/delete-pages
- * @param {File} req.file - PDF file
- * @param {String} req.body.pages - Comma-separated page numbers to delete (e.g., "1,3,5")
- */
 exports.deletePages = async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'PDF file is required' });
         }
 
-        if (!req.body.pages) {
-            return res.status(400).json({ error: 'Pages to delete are required' });
-        }
+        const { pages } = req.body; // e.g., "1,3,5" (pages to delete)
 
         // Load the PDF
         const pdfBytes = await fs.readFile(req.file.path);
         const pdfDoc = await PDFDocument.load(pdfBytes);
         const totalPages = pdfDoc.getPageCount();
 
-        // Parse page numbers to delete (1-indexed)
-        const pagesToDelete = req.body.pages
-            .split(',')
-            .map(p => parseInt(p.trim()) - 1)
-            .filter(p => p >= 0 && p < totalPages)
-            .sort((a, b) => b - a); // Sort in descending order for safe deletion
+        // Parse pages to delete
+        const pagesToDelete = pages.split(',').map(p => parseInt(p.trim()) - 1);
 
-        if (pagesToDelete.length === 0) {
-            return res.status(400).json({ error: 'No valid page numbers provided' });
-        }
+        // Create new PDF with remaining pages
+        const newPdf = await PDFDocument.create();
+        const allPages = Array.from({ length: totalPages }, (_, i) => i);
+        const pagesToKeep = allPages.filter(p => !pagesToDelete.includes(p));
 
-        if (pagesToDelete.length >= totalPages) {
-            return res.status(400).json({ error: 'Cannot delete all pages from PDF' });
-        }
+        const copiedPages = await newPdf.copyPages(pdfDoc, pagesToKeep);
+        copiedPages.forEach((page) => newPdf.addPage(page));
 
-        // Remove pages (in reverse order to maintain indices)
-        for (const pageIndex of pagesToDelete) {
-            pdfDoc.removePage(pageIndex);
-        }
-
-        console.log(`Deleted ${pagesToDelete.length} pages from PDF`);
-
-        // Save the modified PDF
-        const modifiedPdfBytes = await pdfDoc.save();
+        // Save the new PDF
+        const newPdfBytes = await newPdf.save();
         const outputPath = path.join(__dirname, '..', 'uploads', `deleted-pages-${Date.now()}.pdf`);
-        await fs.writeFile(outputPath, modifiedPdfBytes);
+        await fs.writeFile(outputPath, newPdfBytes);
 
         // Clean up uploaded file
-        await fs.unlink(req.file.path).catch(err => console.error('Cleanup error:', err));
+        await fs.unlink(req.file.path);
 
-        // Send the modified file
+        // Send the file
         res.download(outputPath, 'modified.pdf', async (err) => {
-            if (err) {
-                console.error('Download error:', err);
+            if (err) console.error('Download error:', err);
+            try {
+                await fs.unlink(outputPath);
+            } catch (e) {
+                console.error('Cleanup error:', e);
             }
-            // Clean up output file
-            await fs.unlink(outputPath).catch(e => console.error('Output cleanup error:', e));
         });
 
     } catch (error) {
         console.error('Delete pages error:', error);
-
-        // Clean up on error
-        if (req.file) {
-            await fs.unlink(req.file.path).catch(() => { });
-        }
-
-        res.status(500).json({
-            error: 'Failed to delete pages',
-            details: error.message
-        });
+        res.status(500).json({ error: 'Failed to delete pages', details: error.message });
     }
 };
